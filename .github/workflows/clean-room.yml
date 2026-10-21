@@ -1,0 +1,306 @@
+# The clean-room build: proves a client site builds with no Kormsen credential.
+#
+# A fresh GitHub-hosted runner, no secrets, a GITHUB_TOKEN that can only read this repo's
+# contents (no packages scope), no registry but registry.npmjs.org, then
+# `pnpm install --frozen-lockfile && pnpm build`. If it passes, the site is handover-ready.
+#
+# It fails when:
+#   - the caller passed secrets (`secrets: inherit` or named secrets);
+#   - .npmrc or pnpm-workspace.yaml sets a registry other than registry.npmjs.org, or holds a credential;
+#   - a dependency (package.json or pnpm-lock.yaml) resolves to another registry, a git repo or a URL;
+#   - a `file:`/`link:` dependency points outside the repo;
+#   - the lockfile references `vendor/` tarballs, unless `allow-vendor` is true (the default while
+#     sites still vendor @kormsen/cms-astro: then it is a warning).
+#
+# While a @kormsen-engineering/* dependency is not published on npmjs.com yet, it skips install and
+# build with a warning (see the "Kormsen packages published?" step), so a new site from the template
+# shows why instead of failing obscurely.
+#
+# Usage (pin by full commit SHA):
+#   jobs:
+#     clean-room:
+#       uses: kormsen-engineering/site-workflows/.github/workflows/clean-room.yml@<sha>
+#       with:
+#         allow-vendor: true
+
+name: clean-room
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: The site's folder in the repo.
+        type: string
+        default: "."
+      node-version:
+        description: Node.js version. Empty = mise.toml, .node-version or .nvmrc, else 24.
+        type: string
+        default: ""
+      allow-vendor:
+        description: Warn (true) or fail (false) when the lockfile references vendor/ tarballs.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  clean-room:
+    name: clean-room build
+    # Always a fresh GitHub-hosted runner: a self-hosted box may hold credentials or a registry cache.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    env:
+      # No user or global npm config from the runner image; npmjs.com is the only registry.
+      NPM_CONFIG_USERCONFIG: ${{ github.workspace }}/../clean-room-empty-npmrc
+      NPM_CONFIG_GLOBALCONFIG: ${{ github.workspace }}/../clean-room-empty-npmrc
+      NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
+      COREPACK_NPM_REGISTRY: https://registry.npmjs.org
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      NODE_AUTH_TOKEN: ""
+      NPM_TOKEN: ""
+    steps:
+      - name: No secrets passed in
+        working-directory: .
+        env:
+          PASSED: ${{ toJSON(secrets) }}
+        run: |
+          node -e '
+            const names = Object.keys(JSON.parse(process.env.PASSED || "{}")).filter((n) => n !== "github_token");
+            if (names.length) {
+              console.log(`::error title=clean-room::Called with secrets (${names.join(", ")}). Call it without secrets: the point is a build with no credential.`);
+              process.exit(1);
+            }
+            console.log("No secrets passed in.");
+          '
+          : > "$GITHUB_WORKSPACE/../clean-room-empty-npmrc"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Node and pnpm versions
+        id: versions
+        env:
+          INPUT_NODE: ${{ inputs.node-version }}
+        run: |
+          set -euo pipefail
+          node_version="$INPUT_NODE"
+          if [ -z "$node_version" ] && [ -f mise.toml ]; then
+            node_version=$(sed -nE 's/^[[:space:]]*node[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' mise.toml | head -1)
+          fi
+          for f in .node-version .nvmrc; do
+            [ -z "$node_version" ] && [ -f "$f" ] && node_version=$(tr -d ' \nv' < "$f")
+          done
+          echo "node=${node_version:-24}" >> "$GITHUB_OUTPUT"
+          node -e 'const p=require("./package.json"); if(!/^pnpm@\d/.test(p.packageManager||"")){console.log("::error title=clean-room::package.json needs \"packageManager\": \"pnpm@<version>\" (corepack installs that pnpm)."); process.exit(1)}'
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ steps.versions.outputs.node }}
+          # No registry-url: it would write an .npmrc that expects NODE_AUTH_TOKEN.
+
+      - name: pnpm (corepack, from package.json packageManager)
+        run: |
+          corepack enable
+          pnpm --version
+
+      - name: Kormsen packages published?
+        id: published
+        run: |
+          cat > "$RUNNER_TEMP/kormsen-packages-published.mjs" <<'JS'
+          // Is every @kormsen-engineering/* dependency of the site published on npmjs.com?
+          // Writes skip=true to $GITHUB_OUTPUT (and a warning) when one is not published yet.
+          import { appendFileSync, readFileSync } from "node:fs";
+          import { join } from "node:path";
+
+          const dir = process.argv[2] ?? ".";
+          const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+          const deps = { ...pkg.dependencies, ...pkg.devDependencies, ...pkg.optionalDependencies };
+          const unpublished = [];
+          const problems = [];
+          for (const [name, spec] of Object.entries(deps)) {
+            if (!name.startsWith("@kormsen-engineering/")) continue;
+            if (/^(file|link|workspace|npm|git|github|https?):/.test(spec)) continue;
+            const res = await fetch(`https://registry.npmjs.org/${name.replace("/", "%2f")}`, {
+              headers: { accept: "application/vnd.npm.install-v1+json" },
+            });
+            if (res.status === 404) {
+              unpublished.push(name);
+              continue;
+            }
+            if (!res.ok) throw new Error(`registry.npmjs.org answered ${res.status} for ${name}`);
+            const doc = await res.json();
+            if (/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(spec) && !doc.versions?.[spec]) {
+              problems.push(`${name}@${spec} is not a published version (latest: ${doc["dist-tags"]?.latest}). Set the real version in package.json.`);
+            }
+          }
+          const out = process.env.GITHUB_OUTPUT;
+          const summary = process.env.GITHUB_STEP_SUMMARY;
+          if (problems.length) {
+            for (const p of problems) console.log(`::error title=Kormsen package version::${p}`);
+            process.exit(1);
+          }
+          if (unpublished.length) {
+            const list = unpublished.join(", ");
+            const text = `${list} not published on npmjs.com yet: install, build and tests are SKIPPED. This is expected for a site made from site-template before the first publish. Once published, set the version in package.json, run pnpm install and commit pnpm-lock.yaml.`;
+            console.log(`::warning title=Package not published yet::${text}`);
+            if (summary) appendFileSync(summary, `### Skipped: package not published yet\n\n${text}\n`);
+            if (out) appendFileSync(out, "skip=true\n");
+          } else {
+            console.log("Every @kormsen-engineering/* dependency is on npmjs.com (or there is none).");
+            if (out) appendFileSync(out, "skip=false\n");
+          }
+          JS
+          node "$RUNNER_TEMP/kormsen-packages-published.mjs" .
+
+      - name: Dependency sources (npmjs.com only, nothing outside the repo)
+        if: steps.published.outputs.skip != 'true'
+        env:
+          ALLOW_VENDOR: ${{ inputs.allow-vendor }}
+        run: |
+          cat > "$RUNNER_TEMP/check-dependency-sources.mjs" <<'JS'
+          // Checks that a site's dependencies come only from registry.npmjs.org or from inside the repo.
+          //   node check-dependency-sources.mjs <site dir> [allow-vendor: true|false]
+          // Exit 1 on an error. vendor/ tarballs are a warning when allow-vendor is true.
+          import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
+          import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+
+          const root = resolve(process.argv[2] ?? ".");
+          const allowVendor = (process.argv[3] ?? "true") === "true";
+          const NPM_HOST = "registry.npmjs.org";
+          const errors = new Set();
+          const warnings = new Set();
+
+          const inside = (base, path) => {
+            const rel = relative(root, resolve(base, path));
+            return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+          };
+          const isVendor = (base, path) => /(^|\/)vendor\//.test(relative(root, resolve(base, path)).replaceAll("\\", "/"));
+          const npmHost = (url) => {
+            try {
+              return new URL(url).hostname === NPM_HOST;
+            } catch {
+              return false;
+            }
+          };
+          const local = (where, base, kind, path) => {
+            if (!inside(base, path)) errors.add(`${where}: ${kind}:${path} points outside the repo`);
+            else if (isVendor(base, path)) {
+              const text = `${where}: ${kind}:${path} is a vendored tarball; use the published npm package`;
+              (allowVendor ? warnings : errors).add(text);
+            }
+          };
+
+          // 1. Registry settings and credentials.
+          const npmrc = join(root, ".npmrc");
+          if (existsSync(npmrc)) {
+            for (const raw of readFileSync(npmrc, "utf8").split("\n")) {
+              const line = raw.replace(/^\s*[#;].*$/, "").trim();
+              if (!line) continue;
+              const reg = line.match(/^(@[^:=\s]+:)?registry\s*=\s*(\S+)/);
+              if (reg && !npmHost(reg[2])) errors.add(`.npmrc: ${reg[1] ?? ""}registry is ${reg[2]}, not https://${NPM_HOST}/`);
+              if (/(_authToken|_auth|_password|username)\s*=/.test(line)) errors.add(`.npmrc holds a credential setting (${line.split("=")[0].trim()}); a site needs none`);
+            }
+          }
+          const workspace = join(root, "pnpm-workspace.yaml");
+          if (existsSync(workspace)) {
+            let inRegistries = false;
+            for (const raw of readFileSync(workspace, "utf8").split("\n")) {
+              const line = raw.replace(/\s+#.*$/, "");
+              if (/^\S/.test(line)) inRegistries = /^registries\s*:/.test(line);
+              const top = line.match(/^registry\s*:\s*['"]?([^'"\s]+)/);
+              const child = inRegistries && line.match(/^\s+['"]?([^'":]+)['"]?\s*:\s*['"]?(https?:\/\/[^'"\s]+)/);
+              if (top && !npmHost(top[1])) errors.add(`pnpm-workspace.yaml: registry is ${top[1]}, not https://${NPM_HOST}/`);
+              if (child && !npmHost(child[2])) errors.add(`pnpm-workspace.yaml: registries.${child[1]} is ${child[2]}, not https://${NPM_HOST}/`);
+            }
+          }
+
+          // 2. package.json files (the site and any local workspace packages).
+          const manifests = [];
+          const walk = (dir, depth) => {
+            for (const entry of readdirSync(dir, { withFileTypes: true })) {
+              if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+              const path = join(dir, entry.name);
+              if (entry.isDirectory() && depth < 4) walk(path, depth + 1);
+              else if (entry.name === "package.json") manifests.push(path);
+            }
+          };
+          walk(root, 0);
+          for (const file of manifests) {
+            const where = relative(root, file) || "package.json";
+            const pkg = JSON.parse(readFileSync(file, "utf8"));
+            const sections = ["dependencies", "devDependencies", "optionalDependencies"];
+            const specs = sections.flatMap((s) => Object.entries(pkg[s] ?? {}));
+            specs.push(...Object.entries(pkg.pnpm?.overrides ?? {}), ...Object.entries(pkg.overrides ?? {}).filter(([, v]) => typeof v === "string"));
+            for (const [name, spec] of specs) {
+              const m = spec.match(/^(file|link):(.+)$/);
+              if (m) local(where, dirname(file), m[1], m[2]);
+              else if (/^(git\+|git:|github:|gitlab:|bitbucket:|https?:)/.test(spec) || /^[\w.-]+\/[\w.-]+(#.*)?$/.test(spec)) {
+                errors.add(`${where}: ${name} is ${spec}, not a package from ${NPM_HOST}`);
+              }
+            }
+          }
+
+          // 3. pnpm-lock.yaml: what the install will actually fetch.
+          const lockfile = join(root, "pnpm-lock.yaml");
+          if (!existsSync(lockfile)) {
+            errors.add("no pnpm-lock.yaml: commit the lockfile (the clean-room build installs with --frozen-lockfile)");
+          } else {
+            let section = "";
+            let importer = ".";
+            for (const raw of readFileSync(lockfile, "utf8").split("\n")) {
+              if (/^\S/.test(raw)) section = raw.replace(/:.*$/, "");
+              const imp = section === "importers" && raw.match(/^ {2}['"]?([^'":\s][^'":]*)['"]?:\s*$/);
+              if (imp) importer = imp[1];
+              const base = section === "importers" ? resolve(root, importer) : root;
+              for (const m of raw.matchAll(/tarball:\s*['"]?([^,}\s'"]+)/g)) {
+                if (/^https?:/.test(m[1])) {
+                  if (!npmHost(m[1])) errors.add(`pnpm-lock.yaml: a tarball from ${m[1]}, not ${NPM_HOST}`);
+                } else local("pnpm-lock.yaml", root, "file", m[1].replace(/^file:/, ""));
+              }
+              for (const m of raw.matchAll(/\brepo:\s*['"]?([^,}\s'"]+)/g)) errors.add(`pnpm-lock.yaml: a git dependency (${m[1]}), not a package from ${NPM_HOST}`);
+              for (const m of raw.matchAll(/directory:\s*['"]?([^,}\s'"]+)/g)) local("pnpm-lock.yaml", root, "file", m[1]);
+              for (const m of raw.matchAll(/\b(link|file):([^\s,}'"()]+)/g)) {
+                if (raw.includes("tarball:")) continue;
+                local("pnpm-lock.yaml", base, m[1], m[2]);
+              }
+            }
+          }
+
+          const summary = process.env.GITHUB_STEP_SUMMARY;
+          for (const w of warnings) console.log(`::warning title=clean-room::${w}`);
+          for (const e of errors) console.log(`::error title=clean-room::${e}`);
+          if (summary && (warnings.size || errors.size)) {
+            appendFileSync(summary, `### Dependency sources\n\n${[...errors].map((e) => `- error: ${e}`).concat([...warnings].map((w) => `- warning: ${w}`)).join("\n")}\n`);
+          }
+          if (errors.size) process.exit(1);
+          console.log(`Dependency sources OK: ${NPM_HOST} and the repo only${warnings.size ? ` (${warnings.size} warning${warnings.size > 1 ? "s" : ""})` : ""}.`);
+          JS
+          node "$RUNNER_TEMP/check-dependency-sources.mjs" . "$ALLOW_VENDOR"
+
+      - name: Install (frozen lockfile, npmjs.com only)
+        if: steps.published.outputs.skip != 'true'
+        run: pnpm install --frozen-lockfile --registry=https://registry.npmjs.org/
+
+      - name: Build
+        if: steps.published.outputs.skip != 'true'
+        run: pnpm build
+
+      - name: Result
+        if: always()
+        env:
+          SKIP: ${{ steps.published.outputs.skip }}
+          STATUS: ${{ job.status }}
+        run: |
+          if [ "$SKIP" = "true" ]; then
+            echo "Clean-room build SKIPPED: a @kormsen-engineering/* package is not published yet (warning above)."
+          elif [ "$STATUS" = "success" ]; then
+            echo "Clean-room build passed: this site builds with no Kormsen credential."
+            echo "### Clean-room build passed" >> "$GITHUB_STEP_SUMMARY"
+          fi

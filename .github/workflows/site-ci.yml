@@ -1,0 +1,169 @@
+# Site CI for Kormsen client sites (Astro + pnpm, edited with the Kormsen CMS).
+#
+# Steps, each only when the site has the script:
+#   pnpm install --frozen-lockfile → typecheck (or check) → build → test → cms:schema:check
+#
+# While a @kormsen-engineering/* dependency is not published on npmjs.com yet, it skips install and
+# everything after it with a warning, so a new site from site-template shows why instead of failing.
+#
+# Usage (pin by full commit SHA):
+#   jobs:
+#     site-ci:
+#       uses: kormsen-engineering/site-workflows/.github/workflows/site-ci.yml@<sha>
+
+name: site-ci
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: The site's folder in the repo.
+        type: string
+        default: "."
+      node-version:
+        description: Node.js version. Empty = mise.toml, .node-version or .nvmrc, else 24.
+        type: string
+        default: ""
+      runs-on:
+        description: Runner label (for example a self-hosted CI box).
+        type: string
+        default: ubuntu-24.04
+      build-env:
+        description: Extra environment for the build and tests, as KEY=value lines (dummy values only, never secrets).
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  site-ci:
+    name: site CI
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    env:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Node and pnpm versions
+        id: versions
+        env:
+          INPUT_NODE: ${{ inputs.node-version }}
+          BUILD_ENV: ${{ inputs.build-env }}
+        run: |
+          set -euo pipefail
+          node_version="$INPUT_NODE"
+          if [ -z "$node_version" ] && [ -f mise.toml ]; then
+            node_version=$(sed -nE 's/^[[:space:]]*node[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' mise.toml | head -1)
+          fi
+          for f in .node-version .nvmrc; do
+            [ -z "$node_version" ] && [ -f "$f" ] && node_version=$(tr -d ' \nv' < "$f")
+          done
+          echo "node=${node_version:-24}" >> "$GITHUB_OUTPUT"
+          node -e 'const p=require("./package.json"); if(!/^pnpm@\d/.test(p.packageManager||"")){console.log("::error title=site-ci::package.json needs \"packageManager\": \"pnpm@<version>\" (corepack installs that pnpm)."); process.exit(1)}'
+          if [ -n "$BUILD_ENV" ]; then
+            printf '%s\n' "$BUILD_ENV" | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ steps.versions.outputs.node }}
+
+      - name: pnpm (corepack, from package.json packageManager)
+        run: |
+          corepack enable
+          pnpm --version
+
+      - name: Kormsen packages published?
+        id: published
+        run: |
+          cat > "$RUNNER_TEMP/kormsen-packages-published.mjs" <<'JS'
+          // Is every @kormsen-engineering/* dependency of the site published on npmjs.com?
+          // Writes skip=true to $GITHUB_OUTPUT (and a warning) when one is not published yet.
+          import { appendFileSync, readFileSync } from "node:fs";
+          import { join } from "node:path";
+
+          const dir = process.argv[2] ?? ".";
+          const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+          const deps = { ...pkg.dependencies, ...pkg.devDependencies, ...pkg.optionalDependencies };
+          const unpublished = [];
+          const problems = [];
+          for (const [name, spec] of Object.entries(deps)) {
+            if (!name.startsWith("@kormsen-engineering/")) continue;
+            if (/^(file|link|workspace|npm|git|github|https?):/.test(spec)) continue;
+            const res = await fetch(`https://registry.npmjs.org/${name.replace("/", "%2f")}`, {
+              headers: { accept: "application/vnd.npm.install-v1+json" },
+            });
+            if (res.status === 404) {
+              unpublished.push(name);
+              continue;
+            }
+            if (!res.ok) throw new Error(`registry.npmjs.org answered ${res.status} for ${name}`);
+            const doc = await res.json();
+            if (/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(spec) && !doc.versions?.[spec]) {
+              problems.push(`${name}@${spec} is not a published version (latest: ${doc["dist-tags"]?.latest}). Set the real version in package.json.`);
+            }
+          }
+          const out = process.env.GITHUB_OUTPUT;
+          const summary = process.env.GITHUB_STEP_SUMMARY;
+          if (problems.length) {
+            for (const p of problems) console.log(`::error title=Kormsen package version::${p}`);
+            process.exit(1);
+          }
+          if (unpublished.length) {
+            const list = unpublished.join(", ");
+            const text = `${list} not published on npmjs.com yet: install, build and tests are SKIPPED. This is expected for a site made from site-template before the first publish. Once published, set the version in package.json, run pnpm install and commit pnpm-lock.yaml.`;
+            console.log(`::warning title=Package not published yet::${text}`);
+            if (summary) appendFileSync(summary, `### Skipped: package not published yet\n\n${text}\n`);
+            if (out) appendFileSync(out, "skip=true\n");
+          } else {
+            console.log("Every @kormsen-engineering/* dependency is on npmjs.com (or there is none).");
+            if (out) appendFileSync(out, "skip=false\n");
+          }
+          JS
+          node "$RUNNER_TEMP/kormsen-packages-published.mjs" .
+
+      - name: Scripts the site has
+        id: scripts
+        if: steps.published.outputs.skip != 'true'
+        run: |
+          node -e '
+            const s = require("./package.json").scripts ?? {};
+            const out = [
+              `typecheck=${s.typecheck ? "typecheck" : s.check ? "check" : ""}`,
+              `test=${s.test ? "yes" : ""}`,
+              `schema=${s["cms:schema:check"] ? "yes" : ""}`,
+            ];
+            require("fs").appendFileSync(process.env.GITHUB_OUTPUT, out.join("\n") + "\n");
+            console.log(out.join("\n"));
+          '
+
+      - name: Install (frozen lockfile)
+        if: steps.published.outputs.skip != 'true'
+        run: |
+          [ -f pnpm-lock.yaml ] || { echo "::error title=site-ci::No pnpm-lock.yaml. Run pnpm install and commit the lockfile."; exit 1; }
+          pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        if: steps.published.outputs.skip != 'true' && steps.scripts.outputs.typecheck != ''
+        run: pnpm run ${{ steps.scripts.outputs.typecheck }}
+
+      - name: Build
+        if: steps.published.outputs.skip != 'true'
+        run: pnpm build
+
+      - name: Test
+        if: steps.published.outputs.skip != 'true' && steps.scripts.outputs.test == 'yes'
+        run: pnpm test
+
+      - name: CMS schema is up to date (.cms/schema.json)
+        if: steps.published.outputs.skip != 'true' && steps.scripts.outputs.schema == 'yes'
+        run: pnpm run cms:schema:check

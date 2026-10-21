@@ -1,0 +1,19 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@kormsen-engineering/email':
+        specifier: 1.0.0
+        version: 1.0.0
+
+packages:
+
+  '@kormsen-engineering/email@1.0.0':
+    resolution: {integrity: sha512-CCCC, tarball: https://npm.pkg.github.com/download/@kormsen-engineering/email/1.0.0/abc}
+

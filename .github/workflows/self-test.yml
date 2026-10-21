@@ -1,0 +1,44 @@
+# Self-test: runs the reusable workflows of this repo against test-fixture/ (a tiny Astro site with
+# public npm packages only, so the clean-room build passes), and tests the scripts they inline.
+name: self-test
+
+on:
+  push:
+    branches: [main]
+  pull_request: {}
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: self-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scripts:
+    name: inlined scripts and Renovate preset
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.18.0"
+      - name: Tests of the inlined scripts
+        run: node --test tests/*.test.mjs
+      - name: Renovate preset is valid
+        run: npx --yes --package renovate@44.175.0 -- renovate-config-validator --strict default.json
+
+  site-ci:
+    uses: ./.github/workflows/site-ci.yml
+    with:
+      working-directory: test-fixture
+
+  clean-room:
+    uses: ./.github/workflows/clean-room.yml
+    with:
+      working-directory: test-fixture
+      allow-vendor: false

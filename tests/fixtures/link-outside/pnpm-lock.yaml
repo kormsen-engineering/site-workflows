@@ -1,0 +1,14 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      cms:
+        specifier: link:../../machine-ui/packages/kormsen-cms-astro
+        version: link:../../machine-ui/packages/kormsen-cms-astro
+

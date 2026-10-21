@@ -1,0 +1,20 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@kormsen/cms-astro':
+        specifier: file:vendor/kormsen-cms-astro-0.1.0.tgz
+        version: file:vendor/kormsen-cms-astro-0.1.0.tgz(astro@7.3.8)
+
+packages:
+
+  '@kormsen/cms-astro@file:vendor/kormsen-cms-astro-0.1.0.tgz':
+    resolution: {integrity: sha512-BBBB, tarball: file:vendor/kormsen-cms-astro-0.1.0.tgz}
+    version: 0.1.0
+

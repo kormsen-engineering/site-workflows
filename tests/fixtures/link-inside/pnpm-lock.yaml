@@ -1,0 +1,20 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      ui:
+        specifier: link:packages/ui
+        version: link:packages/ui
+
+  packages/ui:
+    dependencies:
+      shared:
+        specifier: link:../shared
+        version: link:../shared
+

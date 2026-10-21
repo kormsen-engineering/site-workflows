@@ -1,0 +1,16 @@
+---
+import { getCollection } from "astro:content";
+
+const notes = await getCollection("notes");
+---
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>site-workflows fixture</title>
+	</head>
+	<body>
+		<ul>
+			{notes.map((note) => <li>{note.data.title}</li>)}
+		</ul>
+	</body>
+</html>

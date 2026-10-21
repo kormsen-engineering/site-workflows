@@ -1,0 +1,20 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      thing:
+        specifier: github:someone/thing#main
+        version: https://codeload.github.com/someone/thing/tar.gz/abc
+
+packages:
+
+  thing@https://codeload.github.com/someone/thing/tar.gz/abc:
+    resolution: {tarball: https://codeload.github.com/someone/thing/tar.gz/abc}
+    version: 1.0.0
+
