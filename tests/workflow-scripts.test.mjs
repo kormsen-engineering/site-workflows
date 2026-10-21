@@ -45,7 +45,7 @@ test("link: inside the repo passes (also relative to a workspace package)", () =
 test("link: outside the repo fails", () => {
 	const r = check("link-outside");
 	assert.equal(r.code, 1, r.out);
-	assert.match(r.out, /::error.*link:\.\.\/\.\.\/machine-ui\/packages\/kormsen-cms-astro points outside the repo/);
+	assert.match(r.out, /::error.*link:\.\.\/\.\.\/elsewhere\/cms-astro points outside the repo/);
 });
 
 test("vendor/ tarballs warn while allow-vendor is true", () => {
@@ -120,10 +120,8 @@ test("default.json is valid JSON with the agreed rules", () => {
 	const cms = rules.find((r) => r.groupName === "Kormsen CMS and Astro");
 	assert.deepEqual(cms.matchPackageNames.sort(), ["@kormsen-engineering/cms-astro", "astro"]);
 	assert.equal(cms.rangeStrategy, "pin");
-	const auto = rules.filter((r) => r.automerge === true);
-	assert.equal(auto.length, 1);
-	assert.deepEqual(auto[0].matchPackageNames, ["@kormsen-engineering/**"]);
-	assert.deepEqual(auto[0].matchUpdateTypes.sort(), ["minor", "patch"]);
+	assert.equal(preset.automerge, false);
+	assert.equal(rules.filter((r) => r.automerge === true).length, 0, "nothing merges by itself");
 	assert.ok(rules.some((r) => r.matchUpdateTypes?.includes("major") && r.dependencyDashboardApproval === true));
 	assert.equal(preset.platformAutomerge, false);
 });

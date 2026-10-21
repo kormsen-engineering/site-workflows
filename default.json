@@ -1,6 +1,6 @@
 {
 	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
-	"description": "Kormsen client sites: weekly, grouped, exact pins; the Kormsen CMS and Astro move together; only @kormsen-engineering minor and patch updates merge themselves, and only on green CI.",
+	"description": "Astro sites edited with the Kormsen CMS: weekly, grouped, exact pins; the Kormsen CMS and Astro move together; nothing merges by itself.",
 	"extends": [
 		"config:recommended",
 		":dependencyDashboard",
@@ -15,32 +15,38 @@
 	"packageRules": [
 		{
 			"description": "Group: one weekly PR for every non-major update.",
-			"matchUpdateTypes": ["minor", "patch", "pin", "digest", "pinDigest"],
+			"matchUpdateTypes": [
+				"minor",
+				"patch",
+				"pin",
+				"digest",
+				"pinDigest"
+			],
 			"groupName": "non-major dependencies",
 			"groupSlug": "non-major"
 		},
 		{
 			"description": "Majors wait for approval on the Dependency Dashboard.",
-			"matchUpdateTypes": ["major"],
+			"matchUpdateTypes": [
+				"major"
+			],
 			"dependencyDashboardApproval": true
 		},
 		{
 			"description": "The Kormsen CMS edit build patches one Astro file, so @kormsen-engineering/cms-astro and astro always move together, pinned exactly.",
-			"matchPackageNames": ["@kormsen-engineering/cms-astro", "astro"],
+			"matchPackageNames": [
+				"@kormsen-engineering/cms-astro",
+				"astro"
+			],
 			"groupName": "Kormsen CMS and Astro",
 			"groupSlug": "kormsen-cms-astro",
 			"rangeStrategy": "pin"
 		},
 		{
-			"description": "Kormsen's own packages, minor and patch: merge when every status check passes. platformAutomerge is off, so Renovate itself waits for green CI even without branch protection.",
-			"matchPackageNames": ["@kormsen-engineering/**"],
-			"matchUpdateTypes": ["minor", "patch"],
-			"automerge": true,
-			"automergeType": "pr"
-		},
-		{
-			"description": "Astro never merges by itself, even in the Kormsen CMS and Astro group (a group merges only when every update in it may).",
-			"matchPackageNames": ["astro"],
+			"description": "Astro never merges by itself.",
+			"matchPackageNames": [
+				"astro"
+			],
 			"automerge": false
 		}
 	]

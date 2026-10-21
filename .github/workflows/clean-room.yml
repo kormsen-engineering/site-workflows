@@ -1,4 +1,4 @@
-# The clean-room build: proves a client site builds with no Kormsen credential.
+# The clean-room build: proves a site builds with no private credential.
 #
 # A fresh GitHub-hosted runner, no secrets, a GITHUB_TOKEN that can only read this repo's
 # contents (no packages scope), no registry but registry.npmjs.org, then
@@ -148,7 +148,7 @@ jobs:
           }
           if (unpublished.length) {
             const list = unpublished.join(", ");
-            const text = `${list} not published on npmjs.com yet: install, build and tests are SKIPPED. This is expected for a site made from site-template before the first publish. Once published, set the version in package.json, run pnpm install and commit pnpm-lock.yaml.`;
+            const text = `${list} not published on npmjs.com yet: install, build and tests are SKIPPED. This is expected for a new site before the first publish. Once published, set the version in package.json, run pnpm install and commit pnpm-lock.yaml.`;
             console.log(`::warning title=Package not published yet::${text}`);
             if (summary) appendFileSync(summary, `### Skipped: package not published yet\n\n${text}\n`);
             if (out) appendFileSync(out, "skip=true\n");

@@ -1,1 +1,1 @@
-{"name":"a","dependencies":{"cms":"link:../../machine-ui/packages/kormsen-cms-astro"}}
+{"name":"a","dependencies":{"cms":"link:../../elsewhere/cms-astro"}}
