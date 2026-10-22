@@ -9,6 +9,6 @@ importers:
   .:
     dependencies:
       cms:
-        specifier: link:../../machine-ui/packages/kormsen-cms-astro
-        version: link:../../machine-ui/packages/kormsen-cms-astro
+        specifier: link:../../elsewhere/cms-astro
+        version: link:../../elsewhere/cms-astro
 

@@ -1,10 +1,10 @@
-# Site CI for Kormsen client sites (Astro + pnpm, edited with the Kormsen CMS).
+# Site CI for Astro sites edited with the Kormsen CMS (Astro + pnpm).
 #
 # Steps, each only when the site has the script:
 #   pnpm install --frozen-lockfile → typecheck (or check) → build → test → cms:schema:check
 #
 # While a @kormsen-engineering/* dependency is not published on npmjs.com yet, it skips install and
-# everything after it with a warning, so a new site from site-template shows why instead of failing.
+# everything after it with a warning, so a new site shows why instead of failing.
 #
 # Usage (pin by full commit SHA):
 #   jobs:
@@ -25,7 +25,7 @@ on:
         type: string
         default: ""
       runs-on:
-        description: Runner label (for example a self-hosted CI box).
+        description: Runner label. Use a GitHub-hosted runner: never a self-hosted runner for a public repo or for pull requests from forks.
         type: string
         default: ubuntu-24.04
       build-env:
@@ -120,7 +120,7 @@ jobs:
           }
           if (unpublished.length) {
             const list = unpublished.join(", ");
-            const text = `${list} not published on npmjs.com yet: install, build and tests are SKIPPED. This is expected for a site made from site-template before the first publish. Once published, set the version in package.json, run pnpm install and commit pnpm-lock.yaml.`;
+            const text = `${list} not published on npmjs.com yet: install, build and tests are SKIPPED. This is expected for a new site before the first publish. Once published, set the version in package.json, run pnpm install and commit pnpm-lock.yaml.`;
             console.log(`::warning title=Package not published yet::${text}`);
             if (summary) appendFileSync(summary, `### Skipped: package not published yet\n\n${text}\n`);
             if (out) appendFileSync(out, "skip=true\n");

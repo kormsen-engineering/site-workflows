@@ -1,10 +1,8 @@
 # site-workflows
 
-Shared GitHub Actions workflows and a Renovate preset for Kormsen client site repos (Astro sites
-edited with the Kormsen CMS). Every site made from
-[`site-template`](https://github.com/kormsen-engineering/site-template) uses them.
+Shared GitHub Actions workflows and a Renovate preset for Astro sites edited with the Kormsen CMS.
 
-This repo holds **no secrets** and is meant to be **public** (see "Why this repo must be public").
+This repo holds **no secrets**.
 
 | File | What it is |
 |---|---|
@@ -49,7 +47,7 @@ Do **not** pass `secrets:` (or `secrets: inherit`) to either: the clean-room bui
 |---|---|---|---|
 | both | `working-directory` | `.` | the site's folder |
 | both | `node-version` | `""` | empty: `node` from `mise.toml`, else `.node-version`/`.nvmrc`, else `24` |
-| `site-ci` | `runs-on` | `ubuntu-24.04` | for example a self-hosted CI box |
+| `site-ci` | `runs-on` | `ubuntu-24.04` | a GitHub-hosted runner; never a self-hosted runner for a public repo or for pull requests from forks |
 | `site-ci` | `build-env` | `""` | `KEY=value` lines for build and tests (dummy values only) |
 | `clean-room` | `allow-vendor` | `true` | `true`: vendor/ tarballs warn; `false`: they fail |
 
@@ -58,8 +56,7 @@ third-party pnpm action.
 
 ## The clean-room build
 
-`distribution-design.md` §7: every site must build with no Kormsen credential, during the contract
-and after the client leaves. The job:
+Every site must build with no private credential, from public packages only. The job:
 
 - runs on a fresh GitHub-hosted runner (never a self-hosted box);
 - has `permissions: contents: read` only: the `GITHUB_TOKEN` has no packages scope; checkout does
@@ -79,9 +76,9 @@ caught by this job.
 ### "Package not published yet"
 
 Both workflows first ask npmjs.com whether every `@kormsen-engineering/*` dependency is published.
-While one is not (today: `@kormsen-engineering/cms-astro`), they **skip** install, build and tests
-with the warning *"Package not published yet"* and a line in the job summary, so a site made from
-`site-template` is green with a clear reason instead of failing obscurely. A published package whose
+While one is not, they **skip** install, build and tests with the warning *"Package not published
+yet"* and a line in the job summary, so a new site is green with a clear reason instead of failing
+obscurely. A published package whose
 pinned version does not exist fails with a clear error.
 
 ## The Renovate preset (`default.json`)
@@ -91,28 +88,8 @@ pinned version does not exist fails with a clear error.
 - all non-major updates in one weekly PR;
 - `@kormsen-engineering/cms-astro` and `astro` in one group ("Kormsen CMS and Astro"), pinned exactly:
   the CMS edit build patches one Astro file, so they must move together;
-- `@kormsen-engineering/*` minor and patch updates **merge themselves only when every status check
-  passes** (`platformAutomerge: false`, so Renovate checks CI itself, even without branch protection).
-  Astro never merges by itself, so a group with an Astro bump waits for review;
+- nothing merges by itself: every update is a PR that a person reviews;
 - majors need approval on the Dependency Dashboard.
-
-## Why this repo must be public
-
-Clients own their site repo from day one, in **their own GitHub org** (`distribution-design.md` §12).
-GitHub lets a workflow call a reusable workflow from a **private** repo only inside the same owner
-(with the repo's Actions access set to the organisation). A site in a client's org cannot call
-`kormsen-engineering/site-workflows` while it is private, and Renovate in the client's org cannot
-read the preset either.
-
-Until it is public:
-
-- sites inside `kormsen-engineering` (private repos) can call it: this repo's Actions access is set
-  to "Accessible from repositories in the kormsen-engineering organization";
-- a site in a client's org cannot. Make this repo public before the first site moves, or copy the
-  workflows into that site (Renovate then updates them).
-
-Before making it public: check that nothing here is client-specific or secret (it is designed so
-nothing is), and add a licence.
 
 ## Tests
 
@@ -121,5 +98,5 @@ node --test tests/*.test.mjs   # the inlined scripts, the preset rules, SHA pinn
 cd test-fixture && pnpm install && pnpm check && pnpm build && pnpm test
 ```
 
-The scripts the workflows run are inlined as heredocs, because a calling job cannot fetch files
-from this repo while it is private. The tests extract and run that exact text.
+The scripts the workflows run are inlined as heredocs, so a calling job needs nothing else from this
+repo. The tests extract and run that exact text.
